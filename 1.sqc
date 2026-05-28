@@ -1,0 +1,161 @@
+
+//Zadatak 5.12: Napisati C/SQL program koji omogućava studentu prijavu na praksu i redom:\n \n
+
+//Ispisuje spisak identifikatora i naziva predmeta za koje može da se prijavi student sa brojem indeksa koji se unosi sa standardnog ulaza. Studentu se nude samo predmeti koje je položio sa ocenom većom od prosečne ocene sa položenih ispita iz tog predmeta i oni koji se ne nalaze u tabeli PRAKSA2020 za odabranog studenta. \n
+//Omogućava odabir jednog predmeta unosom odgovarajućeg identifikatora sa spiska ili unos 0 za kraj. Odabrani predmet se unosu u tabelu PRAKSA2020 ukoliko ispunjava uslove. Posle svakog odabranog predmeta, program nudi studentu izmenjeni spisak predmeta na kom se ne nalaze već odabrani predmeti i postupak se ponavlja. \n
+//Ispisuje izveštaj koji za svaki prijavljeni predmet sadrži naziv predmeta, broj do tada prijavljenih studenata za praksu iz tog predmeta, prosečnu prolaznost iz tog predmeta. Izveštaj urediti opadajuće po prolaznosti. Prolaznost se računa kao količnik broja položenih ispita sa ocenom većom od 5 nevezano za status prijave i broj izlazaka na ispit (broj unosa u tabeli ISPIT sa statusom prijave različitim od n). \n
+//Obrada jedne prijave na praksu treba da predstavlja jednu transakciju.
+
+#include <stdio.h>
+#include <stdlib.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+sqlint32 hIndeks;
+sqlint32 hIdPredmeta;
+char hNazivPredmeta[151];
+sqlint32 hBrStudenata;
+double hProlaznost;
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char* msg){
+    if(SQLCODE < 0){
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, msg);
+        
+        EXEC SQL ROLLBACK;
+        
+        EXEC SQL CONNECT RESET;
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main(int argc, char** argv){
+    
+    EXEC SQL CONNECT TO stud2020 USER student USING abcdef;
+    checkSQL("Connect");
+    
+    printf("Unesite indeks studenta: \n");
+    scanf("%d", &hIndeks);
+    
+    for(;;){
+    
+        EXEC SQL
+            DECLARE cPredmeti CURSOR FOR
+            WITH POMOCNA AS (
+                SELECT      P.ID, P.NAZIV, AVG(I.OCENA + 0.0) AS PROSEK
+                FROM        DA.ISPIT I
+                            JOIN DA.PREDMET P ON I.IDPREDMETA = P.ID
+                WHERE       I.OCENA > 5 AND
+                            I.STATUS = 'o'
+                GROUP BY    P.ID, P.NAZIV
+            )
+            SELECT  P.ID,
+                    P.NAZIV
+            FROM    DA.PREDMET P
+            WHERE   EXISTS (
+                        SELECT  *
+                        FROM    DA.ISPIT I
+                        WHERE   I.INDEKS = :hIndeks AND
+                                I.STATUS = 'o' AND
+                                I.IDPREDMETA = P.ID AND
+                                I.OCENA >= (
+                                    SELECT  POM.PROSEK
+                                    FROM    POMOCNA AS POM
+                                    WHERE   P.NAZIV = POM.NAZIV AND
+                                            P.ID = POM.ID
+                                )
+            ) AND NOT EXISTS (
+                    SELECT  *
+                    FROM    DA.PRAKSA2020
+                    WHERE   INDEKS = :hIndeks AND
+                            IDPREDMETA = P.ID
+                    );
+        checkSQL("Declare");
+        
+        EXEC SQL OPEN cPredmeti;
+        checkSQL("Open cPredmeti");
+        
+        for(;;){
+            EXEC SQL
+                FETCH   cPredmeti
+                INTO    :hIdPredmeta,
+                        :hNazivPredmeta;
+            checkSQL("Fetch");
+                
+            if(SQLCODE == 100){
+                break;
+            }
+                
+            printf("%d %s\n", hIdPredmeta, hNazivPredmeta);
+        }
+        
+        printf("Unesite id predmeta ili 0 za kraj: ");
+        scanf("%d", &hIdPredmeta);
+            
+        if(hIdPredmeta == 0){
+            break;
+        }
+            
+        EXEC SQL
+            INSERT  INTO DA.PRAKSA2020
+            VALUES  (:hIndeks, :hIdPredmeta);
+        checkSQL("Insert");
+
+        EXEC SQL CLOSE cPredmeti;
+        checkSQL("Close cPredmeti");
+        
+        EXEC SQL COMMIT;
+        checkSQL("Potvrdjivanje izmena");
+        
+    }
+    
+    printf("\n\n----------------------Izvestaj predmeta--------------------------\n\n");
+    
+    EXEC SQL
+        DECLARE cPrijavljeniPredmeti CURSOR FOR
+        SELECT      P.NAZIV,
+                    COUNT(DISTINCT P2020.INDEKS) AS BR_STUDENATA,
+                    SUM(CASE
+                            WHEN I.OCENA > 5 AND I.STATUS = 'o' THEN 1.0
+                            ELSE 0.0
+                        END
+                    ) / SUM(CASE
+                                WHEN I.STATUS = 'n' THEN 1.0
+                                ELSE 0.0
+                            END
+                    ) AS PROLAZNOST
+        FROM        DA.PRAKSA2020 P2020
+                    JOIN DA.PREDMET P ON P2020.IDPREDMETA = P.ID
+                    JOIN DA.ISPIT I ON P.ID = I.IDPREDMETA
+        GROUP BY    P.ID, P.NAZIV;
+    checkSQL("Open cPrijavljeniPredmeti");
+    
+    EXEC SQL OPEN cPrijavljeniPredmeti;
+    checkSQL("Open cPrijavljeniPredmeti");
+
+    for(;;){
+        EXEC SQL
+            FETCH   cPrijavljeniPredmeti
+            INTO    :hNazivPredmeta,
+                    :hBrStudenata,
+                    :hProlaznost;
+        checkSQL("cPrijavljeniPredmeti");
+        
+        if(SQLCODE == 100){
+            break;
+        }
+        
+        printf("%s %d %lf\n", hNazivPredmeta, hBrStudenata, hProlaznost);
+        
+    }
+    
+    EXEC SQL CLOSE cPrijavljeniPredmeti;
+    checkSQL("Close");
+    
+    EXEC SQL CONNECT RESET;
+    checkSQL("Reset");
+    
+    return 0;
+}
+
