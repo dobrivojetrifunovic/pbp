@@ -1,0 +1,112 @@
+
+//Zadatak 5.11: Napisati C/SQL program koji za svaki predmet koji je obavezan na smeru čiji je identifikator 101 pronalazi i ispisuje uslovne predmete, a zatim pita korisnika da li želi da poveća ukloni uslovnosti za tekući predmet. Ukoliko je odgovor korisnika ‘da’, aplikacija izvršava brisanje i prikazuje korisniku poruku. Obrada jednog predmeta treba da predstavlja jednu transakciju.
+        
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+sqlint32 hId;
+sqlint32 hIdUslovnog;
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char* msg){
+    if(SQLCODE < 0){
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, msg);
+        
+        EXEC SQL ROLLBACK;
+        
+        EXEC SQL CONNECT RESET;
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main(int argc, char** argv){
+    
+    EXEC SQL CONNECT TO stud2020 USER student USING abcdef;
+    checkSQL("Connect");
+    
+    EXEC SQL
+        DECLARE cKursor1 CURSOR WITH HOLD FOR
+        SELECT  IDPREDMETA
+        FROM    DA.PREDMETPROGRAMA
+        WHERE   VRSTA = 'obavezan' AND
+                IDPROGRAMA = 101;
+    checkSQL("Declare cursor");
+    
+    EXEC SQL
+        DECLARE cKursor2 CURSOR WITH HOLD FOR
+        SELECT  IDUSLOVNOGPREDMETA
+        FROM    DA.USLOVNIPREDMET
+        WHERE   IDPREDMETA = :hId;
+    checkSQL("Declare cursor 2");
+    
+    EXEC SQL OPEN cKursor1;
+    checkSQL("Open");
+    
+    for(;;){
+        
+        EXEC SQL
+            FETCH   cKursor1
+            INTO    :hId;
+        checkSQL("Fetch");
+        
+        if(100 == SQLCODE){
+            break;
+        }
+        
+        printf("Id predmeta: %d\n", hId);
+        
+        EXEC SQL OPEN cKursor2;
+        checkSQL("Open");
+        
+        for(;;){
+            EXEC SQL
+                FETCH   cKursor2
+                INTO    :hIdUslovnog;
+            checkSQL("Fetch");
+            
+            if(100 == SQLCODE){
+                break;
+            }
+        
+            printf("\tUslovni predmet: %d\n", hIdUslovnog);
+            printf("Da li zelite da obrisete uslovnost?");
+            char userResponse[3];
+            scanf("%s", userResponse);
+            getchar();
+            
+            if(strcmp(userResponse, "da") == 0){
+                EXEC SQL
+                    DELETE  FROM DA.USLOVNIPREDMET
+                    WHERE   IDPREDMETA = :hId AND
+                            IDUSLOVNOGPREDMETA = :hIdUslovnog;
+                checkSQL("Delete");
+                printf("Uspesno je obrisana uslovnost predmeta!\n");
+            }
+            
+        }
+        
+        EXEC SQL CLOSE cKursor2;
+        checkSQL("Close2");
+        
+        EXEC SQL COMMIT;
+        checkSQL("Commit");
+    
+    }
+    
+    EXEC SQL CLOSE cKursor1;
+    checkSQL("Close1");
+    
+    EXEC SQL COMMIT;
+    checkSQL("Commit");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("Reset");
+    
+    return 0;
+}
+
