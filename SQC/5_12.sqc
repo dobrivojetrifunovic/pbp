@@ -112,23 +112,30 @@ int main(int argc, char** argv){
     
     printf("\n\n----------------------Izvestaj predmeta--------------------------\n\n");
     
-    EXEC SQL
-        DECLARE cPrijavljeniPredmeti CURSOR FOR
-        SELECT      P.NAZIV,
-                    COUNT(DISTINCT P2020.INDEKS) AS BR_STUDENATA,
-                    SUM(CASE
-                            WHEN I.OCENA > 5 AND I.STATUS = 'o' THEN 1.0
-                            ELSE 0.0
-                        END
-                    ) / SUM(CASE
-                                WHEN I.STATUS = 'n' THEN 1.0
-                                ELSE 0.0
-                            END
-                    ) AS PROLAZNOST
-        FROM        DA.PRAKSA2020 P2020
-                    JOIN DA.PREDMET P ON P2020.IDPREDMETA = P.ID
-                    JOIN DA.ISPIT I ON P.ID = I.IDPREDMETA
-        GROUP BY    P.ID, P.NAZIV;
+    EXEC SQL 
+            DECLARE     cPrijavljeniPredmeti CURSOR WITH HOLD FOR
+            SELECT      (
+                            SELECT  NAZIV 
+                            FROM    DA.PREDMET
+                            WHERE   ID = PR.IDPREDMETA
+                        ),
+                        COUNT(DISTINCT PR.INDEKS),
+                        (
+                        (   SELECT  COUNT(*)
+                            FROM    DA.ISPIT I1 
+                            WHERE   I1.IDPREDMETA = PR.IDPREDMETA AND 
+                                    I1.OCENA > 5
+                        ) / (
+                            1.00 * 
+                        (   
+                            SELECT  COUNT(*)
+                            FROM    DA.ISPIT I2
+                            WHERE   I2.IDPREDMETA = PR.IDPREDMETA AND 
+                                    I2.STATUS <> 'n'))) * 100
+            FROM        DA.PRAKSA2020 PR
+            GROUP BY    PR.IDPREDMETA
+            ORDER BY    3 DESC;
+    checkSQL("DECLARE 2");
     checkSQL("Open cPrijavljeniPredmeti");
     
     EXEC SQL OPEN cPrijavljeniPredmeti;
@@ -158,4 +165,3 @@ int main(int argc, char** argv){
     
     return 0;
 }
-
