@@ -1,2 +1,2 @@
-# pbp
+# Pbp
 Programiranje baza podataka - vezbanje
